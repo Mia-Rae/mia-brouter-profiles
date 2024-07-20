@@ -1,0 +1,505 @@
+# MiaRae's experimental Bike MTB-Trekking profile
+# Version 0.7.1: 
+#     - added non-mtb toggle
+#     - improved evaluation of paths with litte to no info (sketchy)
+#
+# Inspired by poutnikl: https://github.com/poutnikl/Brouter-profiles/wiki
+#
+# Trekking profile which strongly avoids cars/stress and glues onto cycleroutes.
+# Tested only in Germany. Might not work well in other countries.
+# Is okay with trails and paths as long as they are not too rough. 
+# MTB or Gravelbike reccomended. Trekking bike might be sketchy at times.
+
+---context:global
+#bike profile
+assign  validForBikes        1
+
+#
+# settings & switches
+#
+assign   non_mtb_bike           true  # avoid more challanging (but scenic) terrain
+assign   only_lit_ways          true # stick to ways with lighting
+assign   allow_steps            true
+assign   allow_ferries          false
+assign   use_proposed_cn        0     # 0 as default, considers proposed cycle networks as unmarked but valid cycleroutes.
+assign   treat_hiking_as_cycle_routes true # will make hiking routes as magnetic as cycle routes (bike access is still respected)
+
+# this prevents suppression of unused tags, so they are visibly in the data tab;
+# also enable it as option in the profile tab
+assign processUnusedTags = true # %processUnusedTags% | Set to true to output unused tags in data tab | boolean
+
+# Hillcost
+assign   downhillcost   60
+assign   uphillcost     60
+assign   uphillcutoff   5 
+assign   downhillcutoff 5
+# Brouter: Elevation Buffer Handling
+assign  elevationpenaltybuffer 5    # 5 is trekking default (poutnikl)
+assign  elevationmaxbuffer     10   # 10 is trekking default (poutnikl)
+assign  elevationbufferreduce  0.0  # 0.0 is trekking default (poutnikl)
+
+# Brouter: Turn instructions settings
+assign  turnInstructionMode          = 3     # %turnInstructionMode% | Mode for the generated turn instructions | [0=none, 1=auto-choose, 2=locus-style, 3=osmand-style]
+assign  turnInstructionCatchingRange = 40    # %turnInstructionCatchingRange% | Within this distance (in m) several turning instructions are combined into one and the turning angles are better approximated to the general direction | number
+assign  turnInstructionRoundabouts   = true  # %turnInstructionRoundabouts% | Set to "false" to avoid generating special turning instructions for roundabouts | boolean
+assign  considerTurnRestrictions     = false # %considerTurnRestrictions% | Activate to take turn restrictions into account | boolean
+
+# Brouter: A* Algorithm settings
+assign  pass1coefficient 1.8    # A* algo: quick first pass to not have exponential time per distance seraching
+assign  pass2coefficient 0      #          then do proper full-pass using first as cut-off (see https://brouter.de/brouter/algorithm.html)
+
+# Brouter: Kinematic model parameters (travel time computation)
+assign totalMass  = 120     # %totalMass% | Mass (in kg) of the bike + biker, for travel time computation | number
+assign maxSpeed   = 23.5     # %maxSpeed% | Absolute maximum speed (in km/h), for travel time computation | number
+assign S_C_x      = 0.245  # %S_C_x% | Drag coefficient times the reference area (in m^2), for travel time computation | number
+assign C_r        = 0.021   # %C_r% | Rolling resistance coefficient (dimensionless), for travel time computation | number
+assign bikerPower = 160    # %bikerPower% | Average power (in W) provided by the biker, for travel time computation | number
+
+
+
+---context:way
+
+# initial cost
+
+assign initialclassifier
+    if route=ferry then 1
+    else if ( highway=motorway|motorway_link )       then 2
+    else if ( highway=trunk|trunk_link )             then 3
+    else if ( highway=primary|primary_link )         then 4
+    else if ( highway=secondary|secondary_link )     then 5
+    else if ( highway=tertiary|tertiary_link )       then 6
+    else if ( highway=unclassified )                 then 7
+    else if ( highway=residential   )                then 8
+    else if ( highway=living_street  )               then 9
+    else if ( highway=service   )                    then 10
+    else if ( highway=footway   )                    then 11
+    else if ( highway=track|road|path|footway )      then 12
+    else if    ( highway=cycleway )                  then 13
+                                                    else 14
+assign initialcost
+    if route=ferry then 10000
+    else if ( highway=motorway|motorway_link|trunk|trunk_link ) then 500
+    else if ( highway=primary|primary_link )                    then 120
+    else if ( highway=secondary|secondary_link )                then 80
+    else if ( highway=tertiary|tertiary_link|unclassified )     then 50
+    else 10
+
+
+#
+# costfactor
+#
+
+# access & one ways
+
+assign defaultaccess =
+       if access= then not motorroad=yes
+       else if access=private|no then false
+       else true
+
+assign hascycleway = not
+  and ( or cycleway= cycleway=no|none ) and ( or cycleway:left= cycleway:left=no ) ( or cycleway:right= cycleway:right=no )
+
+assign any_cycleroute or route_bicycle_icn=yes or route_bicycle_ncn=yes or route_bicycle_rcn=yes route_bicycle_lcn=yes
+assign any_hikingroute or route_hiking_iwn=yes or route_hiking_nwn=yes or route_hiking_rwn=yes route_hiking_lwn=yes 
+
+assign any_cn_yes or lcn=yes or rcn=yes ncn=yes
+assign any_cn_proposed or lcn=proposed or rcn=proposed ncn=proposed
+assign any_cn or any_cn_yes switch use_proposed_cn any_cn_proposed 0
+
+assign nodeaccessgranted or any_cycleroute or any_cn any_hikingroute
+
+assign bikeaccess =
+       if nodeaccessgranted then true
+       else if hascycleway then true
+       else if bicycle= then   (  if vehicle= then defaultaccess  else not vehicle=private|no   )
+                        else  not bicycle=private|no|dismount
+
+assign isvalidway =
+    if highway=motorway|trunk|primary|secondary|tertiary|unclassified|residential then true
+    else if highway=motorway_link|trunk_link|primary_link|secondary_link|tertiary_link then true
+    else if highway=living_street|service|pedestrian|track|road then true
+    else if highway=footway|bridleway|cycleway|steps|path then true
+    else false
+
+assign footaccess =
+       if bikeaccess then true
+       else if bicycle=dismount then true
+       else if foot= then defaultaccess
+       else not foot=private|no
+
+assign accesspenalty =
+       if highway=construction then 10000
+       else if not isvalidway then 10000
+       else if bikeaccess then 0
+       else if footaccess then 2
+       else 10000
+
+assign badoneway =
+       if reversedirection=yes then
+         if oneway:bicycle=yes then true
+         else if oneway= then junction=roundabout
+         else oneway=yes|true|1
+       else oneway=-1
+
+assign onewaypenalty =
+       if ( badoneway ) then
+         if cycleway=opposite|opposite_lane|opposite_track  then 0
+         else if oneway:bicycle=no                          then 0
+         else if maxspeed=10                                then 0  # dont respect oneways in slow zones
+         else if and highway=service|path or maxspeed=10|20|30 maxspeed= then 0
+         else if maxspeed=20|30                             then 
+           if sidewalk=both|separate                        then 1  # can use sidewalk if needed
+                                                            else 2
+         else if highway=primary|primary_link               then 50
+         else if highway=secondary|secondary_link           then 30
+         else if highway=tertiary|tertiary_link             then 20
+         else 4.0
+
+       else 0.0
+
+#
+# way types
+#
+
+# that probably dont allow cars
+
+assign isbikeonlyway = 
+    if ( and highway=path bicycle=yes|designated|dismount ) then true
+    else if highway=cycleway then true
+    else if ( and highway=footway|pedestrian bicycle=yes|designated|dismount|permissive ) then true
+    else if and railway=abandoned highway=cycleway|footway|path|service|unclassified then true # probably a railway turned cycleway
+    else false
+
+assign carsnotallowedusually =
+    if and not motor_vehicle=yes and not motor_vehicle=designated not motor_vehicle= then true
+    else if and not motorcar= not motorcar=yes then true
+    # else if vehicle=no then true  # would work well but kinda dick move
+    else false
+
+assign isnocarsway =
+    if and not motor_vehicle=yes and not motor_vehicle=designated and not motor_vehicle= not bicycle=no then true
+    else false
+
+assign ispath =
+    if highway=track|bridleway|path then true
+    else false
+
+# ways that allow cars sorted by speed (thus danger & noise pollution)
+
+assign islowtraffic = estimated_traffic_class=1|2|3
+
+assign isbikeroad =
+    if ( and bicycle=yes|designated ( or maxspeed=10|20|30|40 maxspeed= ) ) then true
+    else if bicycle_road=yes then true
+    else false
+
+assign islowspeedroad =
+    if and maxspeed=10|20|30 not highway= then true
+    else if and highway=living_street|residential|service maxspeed= then true
+    else false
+
+assign ishighspeedway = 
+    if maxspeed=50|60 then true 
+    else false
+
+assign ishighspeedwaywithbikelanes = 
+    if ( and ishighspeedway bicycle=designated ) then true
+    else false
+
+assign isveryhighspeedway = 
+    if ( or maxspeed=70|80|90|100|110|120|130 maxspeed= ) then true 
+    else false
+
+# protected bike lanes
+
+assign hasprotectedcyclelane = 
+    if cycleway=track|opposite_track then true
+    else if cycleway:left=track|opposite_track then true
+    else if cycleway:right=track|opposite_track then true
+    else false
+
+# sidewalks
+
+assign issidewalk =
+    if islowspeedroad then false
+    else if and isbikeroad not maxspeed= then false # might erroniously identify sidewals as bike roads if they have no posted speed limit
+    else if footway=sidewalk then true
+    else if sidewalk=both|left|right|yes|separate then true
+    else false
+
+assign issharedsidewalk =
+    if and issidewalk or segregated=no segregated= then true
+    else false
+
+assign isseperatedsidewalk =
+    if and issidewalk segregated=yes then true
+    else false
+
+assign ispedonlysidewalk =
+    if and issidewalk or bicycle= or bicycle=no segregated= then true
+    else false
+
+# bulding the costfactor calculation
+
+assign fuckcarspenalty = 
+    # handle sidewalks first (would otherwise be included in car-free paths)
+    if ispedonlysidewalk then 4
+    else if issharedsidewalk then 2.5                               # sharing with peds is slow and unsafe for them
+    else if isseperatedsidewalk then 1.85                           # sidewalks usually along LOUD roads, so discourage
+    # handle car-free paths
+    else if isbikeonlyway then 1
+    else if isnocarsway then 1
+    else if ispath then 1
+    # handle car-roads by amount of traffic and speed   # old values before rebalance
+    else if and isbikeroad islowtraffic then 1.15       # 1.25
+    else if and islowtraffic islowspeedroad then 1.20   # 1.35
+    else if isbikeroad then 1.30                        # 1.45
+    else if islowspeedroad then 1.30                    # 1.55
+    else if hasprotectedcyclelane then 1.50             # 2
+    else if and ishighspeedwaywithbikelanes islowtraffic then 2.75
+    else if ishighspeedwaywithbikelanes then 3
+    else if ishighspeedway then 4
+    else if isveryhighspeedway then 5
+    # handle unknown roads
+    else 5
+
+#
+# penalise multi-lane roads (dangerous and means LOTS of cars)
+#
+
+assign toomanylanescost =
+    if hasprotectedcyclelane then 1
+    else 2
+
+assign toomanylanespenalty =
+    if and oneway=yes lanes=2|3|4|5|6|7 then toomanylanescost
+    else if lanes=4|5|6|7 then toomanylanescost 
+    else 0
+
+#
+# prefer long distance cycle routes (less turns and less conflicts with cars)
+#
+
+assign pavedbutnotlongdistancecyclewaypenalty =
+    if surface=paved|asphalt|concrete|paving_stones|sett|cobblestone then # exclude unpaved as no cars on those anyway
+        if and highway=cycleway|path|service railway=abandoned then 0
+        else if route_bicycle_icn=yes then 0
+        else if route_bicycle_ncn=yes then 0 
+        else if route_bicycle_rcn=yes then 0.05
+        else if route_bicycle_lcn=yes then 0.10
+        else if or route_hiking_iwn=yes or route_hiking_nwn=yes route_hiking_rwn=yes then 0.15
+        else 0.35
+    else 0
+
+#
+# Surface quality (paths usually have additional information, other ways rely on smoothness)
+#
+
+assign surfacequalitypenality = 
+    if non_mtb_bike then # for road bikes
+        if smoothness=impassable|very_horrible|horrible|very_bad then 9999
+        else if mtb:scale=1|2|3|4|5|6 then 9999           # dangerous
+        else if mtb:scale=0 then 1                      
+        else if smoothness=bad then 1
+        else if smoothness=intermediate then 0.25
+        else if tracktype=grade5|grade4 then 9999
+        else if tracktype=grade3 then 0.25
+        # penalise unpaved and no smoothness or tracktype rating (unless bicycle=designated)
+        else if and 
+            not surface=paved|asphalt|concrete|paving_stones|sett|cobblestone|metal|wood|compacted|fine_gravel|grass_paver
+            bicycle=designated 
+            then 0
+        else if and 
+            not surface=paved|asphalt|concrete|paving_stones|sett|cobblestone|metal|wood|compacted|fine_gravel|grass_paver
+            and smoothness= tracktype=
+            then 9999
+        else 0
+    
+    else # for MTB trekking (default)
+        if smoothness=impassable then 9999          # cannot pass
+        else if mtb:scale=4|5|6 then 9999           # dangerous
+        else if mtb:scale=3 then 10                 # slightly dangerous but doable
+        else if smoothness=very_horrible then 1     # unpleasant
+        else if smoothness=horrible then 1
+        else if smoothness=very_bad then 0.5
+        else if smoothness=bad then 0.25
+        else if tracktype=grade5 then 1             
+        else 0
+
+assign pathqualitypentalty =
+    if not highway=path then 0 # only applies to paths
+    
+    # skip good surfaces
+    else if surface=paved|asphalt|concrete|paving_stones|sett|cobblestone|metal|wood|compacted|fine_gravel|gravel|grass_paver|unpaved then 0
+    else if tracktype=grade1|grade2|grade3|grade4 then 0
+    else if mtb:scale=0|1 then 0
+    
+    # penalise paths with extreme surface types (also see surfacequalitypenality)
+    else if surface=mud then 10
+
+    # penalise taking trails the wrong way (dangerous mountainbikers + might be impossible to get up)
+    else if and mtb:scale=2|3|4|5|6 reversedirection=yes then 9999
+    else if and surface=pebblestone|ground|dirt|earth|grass|sand reversedirection=yes then 500 
+    else if and reversedirection=yes surface= then 9998 # 9999 would be ignore, this will only be taken as last resort 
+
+    # invisible trails are usually rough
+    else if trail_visibility=no then 5
+    else if trail_visibility=horrible then 3
+
+    # penalise unsurveyed paths with no tags at all (probably very unsafe/harsh tiny trail)
+    else if 
+        and access=
+        and motor_vehicle=
+        and or bicycle= bicycle=no
+        and foot=
+        and segregated=
+        and or surface= surface=ground|dirt|earth
+        and smoothness=
+        and not lit=yes
+        and trail_visibility=
+        mtb:scale=
+    then 
+        if surface=ground|dirt|earth then 5       # at least it's somewhat surveyed
+        else if surface= then 100                 # completely unsurveyed
+        else 0
+    else 0
+
+#
+# Bike access
+#
+
+assign bikenotallowedpenalty =
+    if bicycle=no then 2
+    # else if and highway=footway|pedestrian bicycle= then 2
+    else 0
+
+#
+# prefer lit ways
+#
+
+assign notlitpenalty = 
+    if lit=yes then 0
+    else 
+        if only_lit_ways then 3 # seems to work well, lower still prefers non-car ways over lit
+        else 0
+#
+# Final costfactor calculation
+#
+
+assign costfactor
+    # sum all penalties together
+    add fuckcarspenalty 
+    add toomanylanespenalty
+    add pavedbutnotlongdistancecyclewaypenalty
+    add max surfacequalitypenality pathqualitypentalty
+    add bikenotallowedpenalty
+    add notlitpenalty
+    max onewaypenalty accesspenalty
+
+
+# 
+# turncost [cost (in Meter) for a 90-degree turn, calculated as turncost*cos(angle)]
+#
+assign isldcycleroute =
+     if      route_bicycle_icn=yes then true
+     else if route_bicycle_ncn=yes then true
+     else if route_bicycle_rcn=yes then true
+     else if route_bicycle_lcn=yes then true
+     else false
+
+assign turncost = 
+    if isldcycleroute then 0                    # magnetic cycle routes
+    else if treat_hiking_as_cycle_routes then 
+        if any_hikingroute then 0               # make trails more magnetic
+        else if mtb:scale=0|1 then 0            # make trails more magnetic
+        else 120
+    else if junction=roundabout then 100    # slightly less dangerous
+    else 120
+
+#
+# Voice hint generation
+#
+
+# way priorities used for voice hint generation
+assign isresidentialorliving = or highway=residential|living_street living_street=yes
+
+assign priorityclassifier =
+
+  if      ( highway=motorway                          ) then  30
+  else if ( highway=motorway_link                     ) then  29
+  else if ( highway=trunk                             ) then  28
+  else if ( highway=trunk_link                        ) then  27
+  else if ( highway=primary                           ) then  26
+  else if ( highway=primary_link                      ) then  25
+  else if ( highway=secondary                         ) then  24
+  else if ( highway=secondary_link                    ) then  23
+  else if ( highway=tertiary                          ) then  22
+  else if ( highway=tertiary_link                     ) then  21
+  else if ( highway=unclassified                      ) then  20
+  else if ( isresidentialorliving                     ) then  6
+  else if ( highway=service                           ) then  6
+  else if ( highway=cycleway                          ) then  6
+  else if ( or bicycle=designated bicycle_road=yes    ) then  6
+  else if ( highway=track                             ) then if tracktype=grade1 then 6 else 4
+  else if ( highway=bridleway|road|path|footway       ) then  4
+  else if ( highway=steps                             ) then  2
+  else if ( highway=pedestrian                        ) then  2
+  else 0
+
+# some more classifying bits used for voice hint generation...
+
+assign isbadoneway = not equal onewaypenalty 0
+assign isgoodoneway = if reversedirection=yes then oneway=-1
+                      else if oneway= then junction=roundabout else oneway=yes|true|1
+assign isroundabout = junction=roundabout
+assign islinktype = highway=motorway_link|trunk_link|primary_link|secondary_link|tertiary_link
+assign isgoodforcars = if greater priorityclassifier 6 then true
+                  else if ( or isresidentialorliving highway=service ) then true
+                  else if ( and highway=track tracktype=grade1 ) then true
+                  else false
+
+# ... encoded into a bitmask
+
+assign classifiermask add          isbadoneway
+                      add multiply isgoodoneway   2
+                      add multiply isroundabout   4
+                      add multiply islinktype     8
+                          multiply isgoodforcars 16
+
+
+---context:node
+
+assign defaultaccess =
+    if ( access= ) then true
+    else if ( access=private|no ) then false
+    else true
+
+assign bikeaccess =
+    if nodeaccessgranted=yes then true
+    else if bicycle= then
+    (
+        if vehicle= then defaultaccess
+        else not vehicle=private|no
+    )
+    else not bicycle=private|no|dismount
+
+assign footaccess =
+    if bicycle=dismount then true
+    else if foot= then defaultaccess
+    else not foot=private|no
+
+assign traficsignalpenalty =
+    if highway=traffic_signals then 15
+    else if highway=stop then 10
+    else if highway=give_way then 0
+    else if highway=crossing then 0
+    else 0
+
+# assign traficsignalpenalty = 0
+
+assign initialcost =
+    add traficsignalpenalty ( 
+        if bikeaccess then 0
+        else if footaccess then 100 
+        else 1000000
+    )
