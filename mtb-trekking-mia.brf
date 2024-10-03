@@ -1,7 +1,8 @@
 # MiaRae's experimental Bike MTB-Trekking profile
-# Version 0.7.1: 
-#     - added non-mtb toggle
-#     - improved evaluation of paths with litte to no info (sketchy)
+# Version 0.8.1: 
+#     - fixed allow_ferries toggle
+#     - fix: no longer taking peoples private driveways
+#     - feat: now recognising that sometimes footpaths can be cycleroutes
 #
 # Inspired by poutnikl: https://github.com/poutnikl/Brouter-profiles/wiki
 #
@@ -20,7 +21,7 @@ assign  validForBikes        1
 assign   non_mtb_bike           false  # avoid more challanging (but scenic) terrain
 assign   only_lit_ways          false  # stick to ways with lighting
 assign   allow_steps            true
-assign   allow_ferries          false
+assign   allow_ferries          true
 assign   use_proposed_cn        0     # 0 as default, considers proposed cycle networks as unmarked but valid cycleroutes.
 assign   treat_hiking_as_cycle_routes true # will make hiking routes as magnetic as cycle routes (bike access is still respected)
 
@@ -77,7 +78,7 @@ assign initialclassifier
     else if    ( highway=cycleway )                  then 13
                                                     else 14
 assign initialcost
-    if route=ferry then 10000
+    if route=ferry then if allow_ferries then 100 else 10000
     else if ( highway=motorway|motorway_link|trunk|trunk_link ) then 500
     else if ( highway=primary|primary_link )                    then 120
     else if ( highway=secondary|secondary_link )                then 80
@@ -117,8 +118,10 @@ assign bikeaccess =
 assign isvalidway =
     if highway=motorway|trunk|primary|secondary|tertiary|unclassified|residential then true
     else if highway=motorway_link|trunk_link|primary_link|secondary_link|tertiary_link then true
-    else if highway=living_street|service|pedestrian|track|road then true
+    else if highway=living_street|pedestrian|track|road then true
+    else if and highway=service not service=driveway then true
     else if highway=footway|bridleway|cycleway|steps|path then true
+    else if route=ferry then if allow_ferries then true else false
     else false
 
 assign footaccess =
@@ -132,6 +135,7 @@ assign accesspenalty =
        else if not isvalidway then 10000
        else if bikeaccess then 0
        else if footaccess then 2
+       else if route=ferry then if allow_ferries then 0 else 10000
        else 10000
 
 assign badoneway =
@@ -182,6 +186,10 @@ assign isnocarsway =
 
 assign ispath =
     if highway=track|bridleway|path then true
+    else false
+    
+assign isFootpathButCycleroute
+    if and and highway=footway|pedestrian any_cycleroute not bicycle=dismount|no|private then true
     else false
 
 # ways that allow cars sorted by speed (thus danger & noise pollution)
@@ -241,18 +249,19 @@ assign ispedonlysidewalk =
 
 # bulding the costfactor calculation
 
-assign fuckcarspenalty = 
+assign fuckcarspenalty =
+    if isFootpathButCycleroute then 1.2                 # is ok, rather take full cycle route
     # handle sidewalks first (would otherwise be included in car-free paths)
-    if ispedonlysidewalk then 4
-    else if issharedsidewalk then 2.5                               # sharing with peds is slow and unsafe for them
-    else if isseperatedsidewalk then 1.85                           # sidewalks usually along LOUD roads, so discourage
+    else if ispedonlysidewalk then 4
+    else if issharedsidewalk then 2.5                   # sharing with peds is slow and unsafe for them
+    else if isseperatedsidewalk then 1.85               # sidewalks usually along LOUD roads, so discourage
     # handle car-free paths
     else if isbikeonlyway then 1
     else if isnocarsway then 1
     else if ispath then 1
     # handle car-roads by amount of traffic and speed   # old values before rebalance
     else if and isbikeroad islowtraffic then 1.15       # 1.25
-    else if and islowtraffic islowspeedroad then 1.20   # 1.35
+    else if and islowspeedroad islowtraffic then 1.20   # 1.35
     else if isbikeroad then 1.30                        # 1.45
     else if islowspeedroad then 1.30                    # 1.55
     else if hasprotectedcyclelane then 1.50             # 2
@@ -382,6 +391,15 @@ assign notlitpenalty =
     else 
         if only_lit_ways then 3 # seems to work well, lower still prefers non-car ways over lit
         else 0
+
+#
+# prefer lit ways
+#
+
+assign ferrypenalty =
+    if route=ferry then 10
+    else 0
+
 #
 # Final costfactor calculation
 #
@@ -394,6 +412,7 @@ assign costfactor
     add max surfacequalitypenality pathqualitypentalty
     add bikenotallowedpenalty
     add notlitpenalty
+    add ferrypenalty
     max onewaypenalty accesspenalty
 
 
