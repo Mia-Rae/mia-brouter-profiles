@@ -18,8 +18,8 @@ assign  validForBikes        1
 #
 # settings & switches
 #
-assign   non_mtb_bike           true  # avoid more challanging (but scenic) terrain
-assign   avoid_adventure_route  true  # dont take slow, risky routes (downed trees, unsurveyed, etc)
+assign   non_mtb_bike           true   # avoid more challanging (but scenic) terrain
+assign   avoid_adventure_route  true   # dont take slow, risky routes (downed trees, unsurveyed, etc)
 assign   only_lit_ways          false  # stick to ways with lighting
 assign   allow_steps            true
 assign   allow_ferries          true
@@ -33,8 +33,8 @@ assign processUnusedTags = true # %processUnusedTags% | Set to true to output un
 # Hillcost
 assign   downhillcost   60
 assign   uphillcost     60
-assign   uphillcutoff   5 
-assign   downhillcutoff 5
+assign   uphillcutoff   5  
+assign   downhillcutoff if avoid_adventure_route then 5 else 15
 # Brouter: Elevation Buffer Handling
 assign  elevationpenaltybuffer 5    # 5 is trekking default (poutnikl)
 assign  elevationmaxbuffer     10   # 10 is trekking default (poutnikl)
@@ -190,12 +190,13 @@ assign ispath =
     else false
 
 assign theperfectmtbpath =
-    # easy flowing trail, thats not blocked and not going reverse
+    # "easy" flowing trail, thats not blocked and not going reverse
     if 
-        and not avoid_adventure_route 
+        and not avoid_adventure_route    # dont count this if we dont want an adventure
         and mtb:scale=0|1|2 
         and not reversedirection=yes 
-        not smoothness=impassable 
+        and not smoothness=impassable 
+        not surface=mud
     then true
     else false
 
