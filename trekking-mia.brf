@@ -1,8 +1,8 @@
 # MiaRae's experimental Bike MTB-Trekking profile
-# Version 0.8.1: 
-#     - fixed allow_ferries toggle
-#     - fix: no longer taking peoples private driveways
-#     - feat: now recognising that sometimes footpaths can be cycleroutes
+# Version 0.9.1:
+#	- split logic for mtb:scale evaluation from pathquality / surfacequality evaluation into its own penalty
+#   - added down- vs uphill considerations to path/surface quality
+#	- various small rebalances for path/track smoothness penalties
 #
 # Inspired by poutnikl: https://github.com/poutnikl/Brouter-profiles/wiki
 #
@@ -18,7 +18,7 @@ assign  validForBikes        1
 #
 # settings & switches
 #
-assign   non_mtb_bike           true   # avoid more challanging (but scenic) terrain
+assign   non_mtb_bike           true  # avoid more challanging (but scenic) terrain
 assign   avoid_adventure_route  true   # dont take slow, risky routes (downed trees, unsurveyed, etc)
 assign   only_lit_ways          false  # stick to ways with lighting
 assign   allow_steps            true
@@ -34,7 +34,7 @@ assign processUnusedTags = true # %processUnusedTags% | Set to true to output un
 assign   downhillcost   60
 assign   uphillcost     60
 assign   uphillcutoff   5  
-assign   downhillcutoff if avoid_adventure_route then 5 else 15
+assign   downhillcutoff 5
 # Brouter: Elevation Buffer Handling
 assign  elevationpenaltybuffer 5    # 5 is trekking default (poutnikl)
 assign  elevationmaxbuffer     10   # 10 is trekking default (poutnikl)
@@ -316,11 +316,42 @@ assign pavedbutnotlongdistancecyclewaypenalty =
 # Surface quality (paths usually have additional information, other ways rely on smoothness)
 #
 
+
+assign isdownhill =
+    if and incline=down not reversedirection=yes then true
+    else if and reversedirection=yes incline=up then true
+    else false
+
+assign isuphill =
+    if and incline=up not reversedirection=yes then true
+    else if and reversedirection=yes incline=down then true
+    else false
+
+assign hasmtbscale =
+    if mtb:scale=0|1|2|3|4|5|6 then true else false
+
+
+assign mtbscalepenalty =
+    if smoothness=impassable then 9999
+    # dont take trails reverse
+    else if and reversedirection=yes mtb:scale=2|3|4|5|6 then 9999
+    else if and reversedirection=yes mtb:scale=1 then 1
+    else if and isuphill mtb:scale=2|3|4|5|6 then 9999
+    else if and isuphill mtb:scale=1 then if avoid_adventure_route then 1 else 0.5
+    # penalise harder trails
+    else if mtb:scale=0|1 then 0
+    else if mtb:scale=2 then if avoid_adventure_route then 0.5 else 0
+    else if mtb:scale=3 then 10  # doable in a pinch, can push in worst sections
+    else if mtb:scale=4|5|6 then 9999  # requires proper skill and safety gear as dangerous af, fuck that
+    else 0
+
+
 assign surfacequalitypenality = 
-    if non_mtb_bike then # for road bikes
-        if smoothness=impassable|very_horrible|horrible|very_bad then 9999
-        else if mtb:scale=1|2|3|4|5|6 then 9999           # dangerous
-        else if mtb:scale=0 then 1                      
+    if smoothness=impassable then 9999
+    else if non_mtb_bike then
+        # for road bikes
+        if mtb:scale=1|2|3|4|5|6 then 9999
+        else if smoothness=very_horrible|horrible|very_bad then 9999
         else if smoothness=bad then 1
         else if smoothness=intermediate then 0.25
         else if tracktype=grade5|grade4 then 9999
@@ -335,37 +366,54 @@ assign surfacequalitypenality =
             and smoothness= tracktype=
             then 9999
         else 0
-    
-    else # for MTB trekking (default)
-        if smoothness=impassable then 9999          # cannot pass
-        else if mtb:scale=4|5|6 then 9999           # dangerous
-        else if mtb:scale=3 then 10                 # slightly dangerous but doable
-        else if smoothness=very_horrible then 1     # unpleasant
-        else if smoothness=horrible then 1
-        else if smoothness=very_bad then 0.5
-        else if smoothness=bad then 0.25
-        else if tracktype=grade5 then 1             
-        else 0
+    else
+        # for mtb
+        if avoid_adventure_route then
+            # for MTB trekking, as in actually getting places (default)
+            if not isuphill then
+                if smoothness=very_horrible then 1      # unpleasant
+                else if smoothness=horrible then 0.5    # 1 before rebalance
+                else if tracktype=grade5 then 0.5       # 1 before rebalance
+                else 0
+            else
+                if smoothness=very_horrible then 2      # unpleasant
+                else if smoothness=horrible then 1      # 1 before rebalance
+                else if smoothness=very_bad then 0.25   # .5 before rebalance
+                else if smoothness=bad then 0.1         # .25 before rebalance
+                else if tracktype=grade5 then 0.5       # 1 before rebalance
+                else 0
+        else
+            # for MTB adventure
+            if not isuphill then
+                if smoothness=very_horrible then 0.5
+                else if tracktype=grade5 then 0
+                else 0
+            else
+                if smoothness=very_horrible then 1
+                else if smoothness=horrible then 0.5
+                else if tracktype=grade5 then 0.5
+                else 0
+
 
 assign pathqualitypentalty =
-    if not highway=path then 0 # only applies to paths
+    if not highway=path|bridleway|track then 0 # only applies to paths
     
     # skip good surfaces
     else if surface=paved|asphalt|concrete|paving_stones|sett|cobblestone|metal|wood|compacted|fine_gravel|gravel|grass_paver|unpaved then 0
     else if tracktype=grade1|grade2|grade3|grade4 then 0
-    else if mtb:scale=0|1 then 0
     
     # penalise paths with extreme surface types (also see surfacequalitypenality)
     else if surface=mud then 10
 
     # penalise taking trails the wrong way (dangerous mountainbikers + might be impossible to get up)
-    else if and mtb:scale=2|3|4|5|6 reversedirection=yes then 9999
     else if and surface=pebblestone|ground|dirt|earth|grass|sand reversedirection=yes then 500 
     else if and reversedirection=yes surface= then 9998 # 9999 would be ignore, this will only be taken as last resort 
 
     # invisible trails are usually rough
     else if trail_visibility=no then 5
     else if trail_visibility=horrible then 3
+
+    #
 
     # penalise unsurveyed paths with no tags at all (probably very unsafe/harsh tiny trail)
     else if 
@@ -380,8 +428,11 @@ assign pathqualitypentalty =
         and trail_visibility=
         mtb:scale=
     then 
-        if surface=ground|dirt|earth then if avoid_adventure_route then 5 else 0    # at least it's somewhat surveyed
-        else if surface= then if avoid_adventure_route then 100 else 5              # completely unsurveyed
+        if surface=ground|dirt|earth then                               # at least it's somewhat surveyed
+            if isdownhill then if avoid_adventure_route then 1 else 0.5
+            else if isuphill then if avoid_adventure_route then 10 else 2
+            else if avoid_adventure_route then 5 else 1
+        else if surface= then if avoid_adventure_route then 100 else 5  # completely unsurveyed
         else 0
     else 0
 
@@ -431,7 +482,9 @@ assign costfactor
         add fuckcarspenalty 
         add toomanylanespenalty
         add pavedbutnotlongdistancecyclewaypenalty
-        add max surfacequalitypenality pathqualitypentalty
+        add if and hasmtbscale not non_mtb_bike
+            then mtbscalepenalty 
+            else max max surfacequalitypenality pathqualitypentalty mtbscalepenalty
         add ispavedorboringpentalty
         add bikenotallowedpenalty
         add notlitpenalty
